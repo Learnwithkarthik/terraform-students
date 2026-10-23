@@ -1,5 +1,5 @@
 
-name: Terraform Init and Plan
+name: Terraform CI CD with Manual Approval
 
 on:
   workflow_dispatch:
@@ -8,7 +8,13 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: terraform-students-dev
+  cancel-in-progress: false
+
 jobs:
+
+  # JOB 1 - INIT, VALIDATE AND PLAN
   terraform-plan:
     name: Terraform Init Validate Plan
     runs-on: ubuntu-latest
@@ -18,7 +24,7 @@ jobs:
         working-directory: ./terraform-gcp-student-demo/terraform-gcp-student-demo
 
     steps:
-      - name: Checkout GitHub Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Authenticate to GCP using WIF
@@ -27,10 +33,9 @@ jobs:
           project_id: ${{ vars.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-          create_credentials_file: true
 
       - name: Install Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.14.0"
 
@@ -41,4 +46,59 @@ jobs:
         run: terraform validate -no-color
 
       - name: Terraform Plan
-        run: terraform plan -no-color -input=false
+        run: terraform plan -no-color -input=false -out=tfplan
+
+      - name: Show Terraform Plan
+        run: terraform show -no-color tfplan
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: ./terraform-gcp-student-demo/terraform-gcp-student-demo/tfplan
+          retention-days: 1
+
+
+  # JOB 2 - MANUAL APPROVAL AND APPLY
+  terraform-apply:
+    name: Terraform Apply After Approval
+    needs: terraform-plan
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    defaults:
+      run:
+        working-directory: ./terraform-gcp-student-demo/terraform-gcp-student-demo
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP using WIF
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+
+      - name: Terraform Init
+        run: terraform init -input=false -reconfigure
+
+      - name: Download Approved Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: ./terraform-gcp-student-demo/terraform-gcp-student-demo
+
+      - name: Terraform Apply
+        run: terraform apply -input=false -no-color tfplan
+
+      - name: Terraform Outputs
+        run: terraform output

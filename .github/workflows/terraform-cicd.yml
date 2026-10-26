@@ -1,0 +1,26 @@
+
+name: Terraform CI CD New Workflow
+
+on:
+  workflow_dispatch:
+
+jobs:
+  terraform-plan:
+    name: Test Terraform Plan Job
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Confirm New Workflow
+        run: echo "New GitHub Actions workflow is running"
+
+  terraform-apply:
+    name: Test Manual Approval
+    needs: terraform-plan
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+      - name: Confirm Approval
+        run: echo "Manual approval successful"

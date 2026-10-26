@@ -1,20 +1,77 @@
 
-name: Terraform CI CD New Workflow
+name: Terraform GCP CI CD
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-gcp-dev
+  cancel-in-progress: false
+
+env:
+  TF_DIR: terraform-gcp-student-demo/terraform-gcp-student-demo
+  TF_IN_AUTOMATION: "true"
+
 jobs:
+
+  # ========================================
+  # JOB 1: TERRAFORM INIT, VALIDATE, PLAN
+  # ========================================
   terraform-plan:
-    name: Test Terraform Plan Job
+    name: Terraform Init Validate Plan
     runs-on: ubuntu-latest
 
     steps:
-      - name: Confirm New Workflow
-        run: echo "New GitHub Actions workflow is running"
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
+      - name: Authenticate to GCP using WIF
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.14.0"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false -reconfigure
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Show Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform show -no-color tfplan
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: ${{ env.TF_DIR }}/tfplan
+          retention-days: 1
+          if-no-files-found: error
+
+  # ========================================
+  # JOB 2: MANUAL APPROVAL + TERRAFORM APPLY
+  # ========================================
   terraform-apply:
-    name: Test Manual Approval
+    name: Terraform Apply After Approval
     needs: terraform-plan
     runs-on: ubuntu-latest
 
@@ -22,5 +79,37 @@ jobs:
       name: production
 
     steps:
-      - name: Confirm Approval
-        run: echo "Manual approval successful"
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP using WIF
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.14.0"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false -reconfigure
+
+      - name: Download Approved Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: ${{ env.TF_DIR }}
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -input=false -no-color tfplan
+
+      - name: Terraform Outputs
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform output -no-color
